@@ -1,5 +1,5 @@
 for i in {1..5}; do
-    aws workspaces describe-workspaces --directory-id d-9067795b33 --query 'Workspaces[*].[UserName,State]' --output table >> output.txt 2>&1
+    aws workspaces describe-workspaces --directory-id HERE --query 'Workspaces[*].[UserName,State]' --output table >> output.txt 2>&1
     if [ $? -eq 0 ]; then
         break
     fi
