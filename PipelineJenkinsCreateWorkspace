@@ -1,0 +1,23 @@
+//Install and configure cli aws in jenkins environment add directory id and bundle id
+pipeline {
+    agent any
+
+    parameters {
+        string(defaultValue: '', description: 'Nome de usuário para a workspace', name: 'USERNAME')
+    }
+
+    stages {
+        stage('Create Workspace') {
+            steps {
+                script {
+                    // Utilizar o nome de usuário para criar a workspace
+                    sh """
+                        aws workspaces create-workspaces \\
+                            --workspaces DirectoryId=YOUR-DIRECTORY-ID,UserName=${params.USERNAME},BundleId=YOUR-BUNDLE-ID
+                    """
+                }
+            }
+        }
+    }
+}
+

@@ -1,0 +1,43 @@
+//Install and configure cli aws in jenkins environment add directory id
+pipeline {
+    agent any
+
+    stages {
+        stage('Delete Workspace') {
+            steps {
+                script {
+                    // Definir o DirectoryId diretamente no código
+                    def DirectoryId = "YOUR-DIRECTORY-ID"
+
+                    // Solicitar o nome do usuário
+                    def UserName = input(
+                        id: 'userInput', 
+                        message: 'Digite o nome do usuário da workspace:', 
+                        parameters: [string(defaultValue: '', description: 'Nome do usuário', name: 'USERNAME')]
+                    )
+
+                    // Pesquisar pelas Workspaces associadas ao usuário e armazenar os IDs em uma variável
+                    def WorkspaceIds = sh(
+                        script: "aws workspaces describe-workspaces --directory-id $DirectoryId --user-name '${UserName}' --query 'Workspaces[*].WorkspaceId' --output text",
+                        returnStdout: true
+                    ).trim()
+
+                    // Verificar se há Workspaces associadas ao usuário
+                    if (WorkspaceIds) {
+                        // Remover formatação desnecessária da saída do comando
+                        WorkspaceIds = WorkspaceIds.replaceAll(' ', ',').trim()
+
+                        // Iterar sobre os IDs das Workspaces e terminar cada uma delas
+                        def WorkspaceIdArray = WorkspaceIds.split(',')
+                        for (def WorkspaceId in WorkspaceIdArray) {
+                            sh "aws workspaces terminate-workspaces --terminate-workspace-requests ${WorkspaceId} >> terminate.log"
+                            echo "Workspace associada ao usuário ${UserName} removida"
+                        }
+                    } else {
+                        echo "Nenhuma workspace encontrada para o usuário ${UserName}"
+                    }
+                }
+            }
+        }
+    }
+}
