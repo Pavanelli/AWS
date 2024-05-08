@@ -1,0 +1,28 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'USER_INPUT', defaultValue: '', description: 'Digite o login do usuário:')
+    }
+    
+    stages {
+        stage('Reiniciar Workspace') {
+            steps {
+                script {
+                    def userInput = params.USER_INPUT
+                    
+                    // Pesquisar a Workspace associada ao usuário
+                    def workspaceId = sh(script: "aws workspaces describe-workspaces --query \"Workspaces[?UserName=='${userInput}'].WorkspaceId\" --output text", returnStdout: true).trim()
+                    
+                    // Reiniciar a Workspace se encontrada
+                    if (workspaceId) {
+                        sh "aws workspaces reboot-workspaces --reboot-workspace-requests ${workspaceId}"
+                        echo "Workspace reiniciada com sucesso para o usuário '${userInput}'."
+                    } else {
+                        echo "Nenhuma Workspace encontrada para o usuário '${userInput}'."
+                    }
+                }
+            }
+        }
+    }
+}
