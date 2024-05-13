@@ -2,19 +2,28 @@
 pipeline {
     agent any
 
+    parameters {
+        string(
+            defaultValue: '', 
+            description: 'Nome de usuário para a workspace', 
+            name: 'USERNAME'
+        )
+    }
+
     stages {
         stage('Delete Workspace') {
             steps {
                 script {
                     // Definir o DirectoryId diretamente no código
-                    def DirectoryId = "YOUR-DIRECTORY-ID"
+                    def DirectoryId = "d-9067795b33"
 
-                    // Solicitar o nome do usuário
-                    def UserName = input(
-                        id: 'userInput', 
-                        message: 'Digite o nome do usuário da workspace:', 
-                        parameters: [string(defaultValue: '', description: 'Nome do usuário', name: 'USERNAME')]
-                    )
+                    // Recuperar o nome do usuário do parâmetro
+                    def UserName = params.USERNAME
+
+                    // Validar se o nome de usuário não está vazio
+                    if (!UserName || UserName.isEmpty()) {
+                        error "O nome de usuário não pode estar vazio."
+                    }
 
                     // Pesquisar pelas Workspaces associadas ao usuário e armazenar os IDs em uma variável
                     def WorkspaceIds = sh(
