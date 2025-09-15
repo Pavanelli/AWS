@@ -1,0 +1,123 @@
+# install first pip install boto3 botocore
+
+
+import csv
+from datetime import datetime, timedelta, timezone
+from typing import List, Tuple, Optional
+
+import boto3
+from botocore.exceptions import ClientError
+
+s3 = boto3.client('s3')
+
+def get_bucket_region(bucket_name: str) -> str:
+    """Resolve a região real do bucket."""
+    resp = s3.get_bucket_location(Bucket=bucket_name)
+    lc = resp.get('LocationConstraint')
+    # Mapeamentos legados da AWS
+    if lc in (None, 'US'):  # buckets antigos "US" => us-east-1
+        return 'us-east-1'
+    if lc == 'EU':
+        return 'eu-west-1'
+    return lc
+
+def list_storage_types(cw, bucket_name: str) -> List[str]:
+    """
+    Usa CloudWatch ListMetrics para descobrir todos os StorageType
+    que existem para este bucket (mais robusto do que manter lista fixa).
+    """
+    storage_types = set()
+    token = None
+    while True:
+        kwargs = {
+            'Namespace': 'AWS/S3',
+            'MetricName': 'BucketSizeBytes',
+            'Dimensions': [{'Name': 'BucketName', 'Value': bucket_name}],
+        }
+        if token:
+            kwargs['NextToken'] = token
+        resp = cw.list_metrics(**kwargs)
+        for m in resp.get('Metrics', []):
+            for d in m.get('Dimensions', []):
+                if d['Name'] == 'StorageType':
+                    storage_types.add(d['Value'])
+        token = resp.get('NextToken')
+        if not token:
+            break
+
+    # Fallback: se não veio nada (bucket muito novo ou atraso), tenta classes comuns.
+    if not storage_types:
+        storage_types = {
+            'StandardStorage',
+            'StandardIAStorage',
+            'OneZoneIAStorage',
+            'IntelligentTieringFAStorage',
+            'IntelligentTieringIAStorage',
+            'IntelligentTieringAAStorage',
+            'GlacierInstantRetrievalStorage',
+            'GlacierStorage',
+            'GlacierDeepArchiveStorage',
+            'ReducedRedundancyStorage',
+            # Você pode incluir overheads se quiser máxima precisão:
+            # 'StandardIASizeOverhead','StandardIAObjectOverhead',
+            # 'GlacierS3ObjectOverhead','DeepArchiveS3ObjectOverhead'
+        }
+    return sorted(storage_types)
+
+def get_latest_bytes(cw, bucket: str, st: str, days_back: int = 14) -> Tuple[int, Optional[datetime]]:
+    """
+    Busca o último datapoint disponível (métricas diárias podem atrasar).
+    """
+    try:
+        resp = cw.get_metric_statistics(
+            Namespace='AWS/S3',
+            MetricName='BucketSizeBytes',
+            Dimensions=[
+                {'Name': 'BucketName', 'Value': bucket},
+                {'Name': 'StorageType', 'Value': st}
+            ],
+            StartTime=datetime.now(timezone.utc) - timedelta(days=days_back),
+            EndTime=datetime.now(timezone.utc),
+            Period=86400,  # 1 dia
+            Statistics=['Average'],
+            Unit='Bytes'
+        )
+        dps = sorted(resp.get('Datapoints', []), key=lambda x: x['Timestamp'])
+        if dps:
+            latest = dps[-1]
+            return int(latest['Average']), latest['Timestamp']
+        return 0, None
+    except ClientError as e:
+        print(f"[WARN] {bucket}/{st}: {e}")
+        return 0, None
+
+def main():
+    buckets = s3.list_buckets().get('Buckets', [])
+    out = 's3_bucket_sizes_total_v2.csv'
+    with open(out, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['bucket_name', 'region', 'size_bytes_total', 'size_gb_total', 'timestamp_utc'])
+
+        for b in buckets:
+            name = b['Name']
+            region = get_bucket_region(name)
+            cw = boto3.client('cloudwatch', region_name=region)
+
+            storage_types = list_storage_types(cw, name)
+            total = 0
+            latest_ts = None
+
+            for st in storage_types:
+                size_bytes, ts = get_latest_bytes(cw, name, st)
+                total += size_bytes
+                if ts and (latest_ts is None or ts > latest_ts):
+                    latest_ts = ts
+
+            size_gb = round(total / (1024 ** 3), 2)
+            writer.writerow([name, region, total, size_gb, latest_ts.isoformat() if latest_ts else ''])
+            print(f"{name} [{region}]: {size_gb:.2f} GB")
+
+    print(f"\n✅ Arquivo gerado: {out}")
+
+if __name__ == '__main__':
+    main()
